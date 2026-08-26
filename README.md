@@ -163,6 +163,11 @@ It also shows the interoperability gap: neither A2A nor MCP core semantics defin
 - Revocation, expiry, replay defense, identity binding, multi-hop depth, and user re-approval are not yet modeled.
 - This fixture does not claim that the extension identifiers or authority schema should be standardized.
 
+## Community discussion
+
+- A2A: https://github.com/a2aproject/A2A/discussions/2181
+- MCP: https://github.com/orgs/modelcontextprotocol/discussions/847
+
 ## Publication gate
 
 Do not turn these findings into broad standards claims, an upstream proposal, or a compatibility claim until HO-005 / overlap review is complete.
