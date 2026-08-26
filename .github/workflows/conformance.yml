@@ -1,0 +1,39 @@
+name: conformance
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run conformance fixture
+        run: python run_conformance.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Assert generated traces match committed traces
+        run: |
+          # run_conformance.py rewrites traces/ with fresh timestamps on every run.
+          # Timestamps may differ; no other field may.
+          git diff --exit-code --ignore-matching-lines='"time"' -- traces/
