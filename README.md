@@ -62,10 +62,13 @@ protocol):
   - MCP: `io.example.a2a-mcp-conformance/delegation-chain`, a namespaced
     key under `CallToolRequestParams._meta`.
 
-**This repository does NOT claim that A2A or MCP currently standardize this
+**This repository does not claim that A2A or MCP standardize this
 delegation representation.** It tests whether an implementation *built on
 top of* their existing, protocol-legal extension/metadata mechanisms can
 preserve and enforce a narrowed delegated authority across both boundaries.
+
+**This fixture tests whether narrowed delegated authority can be preserved
+and enforced across A2A and MCP protocol boundaries.**
 
 ## SDKs used (exact versions)
 

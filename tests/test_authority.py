@@ -165,3 +165,39 @@ def test_resource_scope_escalation_is_rejected(signer):
             signer, chain, "refund_order", {"order_id": "O-9999", "amount_usd": "18.00"}
         )
     assert exc_info.value.code == "RESOURCE_SCOPE_ESCALATION"
+
+
+def test_signature_survives_a_real_protobuf_struct_round_trip(signer):
+    """Regression test for the real A2A boundary effect diagnosed during implementation.
+
+    A2A carries fixture metadata in `Message.metadata`, a
+    `google.protobuf.Struct`. Struct's only numeric kind is `double`, so a
+    bare JSON integer (e.g. `max_uses: 1`) becomes `1.0` after a real
+    Struct round trip -- which would invalidate a signature computed over
+    the pre-round-trip JSON if any signed scalar were a JSON number. This
+    fixture avoids that instability by keeping every signed grant scalar a
+    JSON string (see the module-level NOTE above `DelegationChain`). This
+    test proves that property against the real `google.protobuf.Struct`
+    type, not just against plain-dict serialization.
+    """
+    from google.protobuf.json_format import MessageToDict
+    from google.protobuf.struct_pb2 import Struct
+
+    chain = build_chain(signer)
+    wire = chain.to_wire()
+
+    struct = Struct()
+    struct.update({"delegation_chain": wire})
+    roundtripped_wire = MessageToDict(struct)["delegation_chain"]
+
+    roundtripped_chain = DelegationChain.from_wire(roundtripped_wire)
+
+    # If a signed scalar had been a JSON number, the Struct round trip would
+    # have silently changed it (e.g. 1 -> 1.0), and this would raise
+    # InvalidAuthoritySignature. It must not.
+    assert_request_is_within_authority(
+        signer, roundtripped_chain, "refund_order", {"order_id": ORDER_ID, "amount_usd": "18.00"}
+    )
+    for original_link, roundtripped_link in zip(chain.links, roundtripped_chain.links):
+        assert original_link.signature == roundtripped_link.signature
+        assert original_link.grant == roundtripped_link.grant
