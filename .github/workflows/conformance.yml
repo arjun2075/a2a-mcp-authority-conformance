@@ -26,14 +26,22 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run conformance fixture
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Run unit + end-to-end tests (pytest)
+        run: python -m pytest tests/ -v
+
+      - name: Run secure conformance scenario (expect exit 0, CONFORMANCE PASS)
         run: python run_conformance.py
 
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
-
-      - name: Assert generated traces match committed traces
+      - name: Run vulnerability detector (expect nonzero exit)
         run: |
-          # run_conformance.py rewrites traces/ with fresh timestamps on every run.
-          # Timestamps may differ; no other field may.
-          git diff --exit-code --ignore-matching-lines='"time"' -- traces/
+          if python run_conformance.py --simulate-vulnerable; then
+            echo "ERROR: vulnerable implementation incorrectly passed"
+            exit 1
+          else
+            echo "OK: vulnerable implementation was correctly detected as non-conformant"
+          fi

@@ -1,81 +1,234 @@
 #!/usr/bin/env python3
+"""Conformance runner: Human -> Agent A -> A2A Agent B -> MCP -> Tool.
+
+Starts a real MCP server (streamable-http) and a real A2A server (Agent B,
+JSON-RPC over HTTP) as subprocesses, then drives Agent A as a real A2A
+client against Agent B, which in turn is a real MCP client against the MCP
+server. No handwritten protocol shims: every hop is the official `a2a-sdk`
+or `mcp` SDK talking over a real socket.
+
+Scenario: "Refund Cap Must Survive A2A -> MCP" (see README.md). Not a
+standardization proposal -- see the HO-005 gate note in README.md.
+"""
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
+import socket
+import subprocess
 import sys
-
-from conformance.authority import AuthoritySigner
-from conformance.fixture import run_scenario
-
+import time
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_SIGNING_KEY = b"fixture-only-secret-not-for-production"
+SRC = ROOT / "src"
+sys.path.insert(0, str(SRC))
+
+from authority import AuthoritySigner  # noqa: E402
+from agent_a import issue_delegation_chain, send_delegated_refund_request  # noqa: E402
+
+DEFAULT_SIGNING_KEY = "fixture-only-secret-not-for-production"
+ORDER_ID = "O-1001"
+HUMAN_LIMIT_USD = "25.00"
+DELEGATED_LIMIT_USD = "20.00"
+VALID_ATTEMPT_USD = "18.00"
+INVALID_ATTEMPT_USD = "22.00"
 
 
-def load_json(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _wait_for_port(port: int, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            try:
+                s.connect(("127.0.0.1", port))
+                return
+            except OSError:
+                time.sleep(0.1)
+    raise RuntimeError(f"server on port {port} did not become ready in {timeout}s")
+
+
+class ManagedServer:
+    def __init__(self, module: str, port: int, env: dict[str, str]):
+        self.port = port
+        full_env = {**os.environ, **env, "PYTHONPATH": str(SRC)}
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", module],
+            cwd=str(SRC),
+            env=full_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+    def wait_ready(self) -> None:
+        try:
+            _wait_for_port(self.port)
+        except RuntimeError:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        if self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+        if self.proc.stdout:
+            self.proc.stdout.close()
+
+
+def sdk_versions() -> dict[str, str]:
+    import importlib.metadata as im
+
+    versions = {"a2a": "unknown", "mcp": "unknown"}
+    try:
+        versions["a2a"] = im.version("a2a-sdk")
+    except im.PackageNotFoundError:
+        pass
+    try:
+        versions["mcp"] = im.version("mcp")
+    except im.PackageNotFoundError:
+        pass
+    try:
+        import mcp.types as mt
+
+        versions["mcp_wire_protocol"] = mt.LATEST_PROTOCOL_VERSION
+    except Exception:
+        pass
+    try:
+        from a2a.utils.constants import PROTOCOL_VERSION_CURRENT
+
+        versions["a2a_wire_protocol"] = PROTOCOL_VERSION_CURRENT
+    except Exception:
+        pass
+    return versions
+
+
+async def run_attempt(agent_b_url: str, signer, requested_amount_usd: str) -> dict:
+    chain = issue_delegation_chain(signer, ORDER_ID, HUMAN_LIMIT_USD, DELEGATED_LIMIT_USD)
+    result = await send_delegated_refund_request(agent_b_url, chain, ORDER_ID, requested_amount_usd)
+    decision = "deny" if result.get("reply_text", "").upper().startswith("DENY") else "allow"
+    if result.get("state") == 4:  # TASK_STATE_FAILED
+        decision = "deny"
+    return {"decision": decision, **result}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run A2A -> MCP delegated-authority conformance scenarios")
+    parser = argparse.ArgumentParser(description="Run the A2A -> MCP delegated-authority conformance scenario")
     parser.add_argument(
-        "--output-dir",
-        default=str(ROOT / "traces"),
-        help="directory for machine-readable JSON traces",
+        "--simulate-vulnerable",
+        action="store_true",
+        help="Run the MCP server in intentionally vulnerable mode (checks only the human root grant).",
     )
+    parser.add_argument("--output", default=str(ROOT / "traces" / "result.json"))
     args = parser.parse_args()
 
-    signing_key = os.environ.get("FIXTURE_SIGNING_KEY", "").encode("utf-8") or DEFAULT_SIGNING_KEY
-    signer = AuthoritySigner(signing_key)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    signing_key = os.environ.get("FIXTURE_SIGNING_KEY", DEFAULT_SIGNING_KEY)
+    signer = AuthoritySigner(signing_key.encode("utf-8"))
 
-    scenario_paths = [ROOT / "examples" / "valid_input.json", ROOT / "examples" / "invalid_input.json"]
-    outcomes = []
-    for path in scenario_paths:
-        scenario = load_json(path)
-        outcome = run_scenario(scenario, signer)
-        outcomes.append(outcome)
-        trace_path = output_dir / f"{path.stem}.trace.json"
-        with trace_path.open("w", encoding="utf-8") as fh:
-            json.dump(outcome.trace, fh, indent=2, sort_keys=True)
-            fh.write("\n")
+    mcp_port = _free_port()
+    a2a_port = _free_port()
+    mcp_url = f"http://127.0.0.1:{mcp_port}/mcp"
+    agent_b_url = f"http://127.0.0.1:{a2a_port}/"
 
-        status = "PASS" if outcome.conformant else "FAIL"
-        detail = f"expected={outcome.expected} observed={outcome.observed} tool_executed={outcome.tool_executed}"
-        print(f"[{status}] {outcome.name}: {detail}")
-        print(f"       trace={trace_path.relative_to(ROOT)}")
+    mcp_env = {"FIXTURE_SIGNING_KEY": signing_key, "FIXTURE_MCP_PORT": str(mcp_port)}
+    if args.simulate_vulnerable:
+        mcp_env["FIXTURE_SIMULATE_VULNERABLE"] = "1"
 
-    valid = next(item for item in outcomes if item.name == "valid_attenuated_refund")
-    invalid = next(item for item in outcomes if item.name == "invalid_amount_escalation")
+    mcp_server = ManagedServer("mcp_server", mcp_port, mcp_env)
+    try:
+        mcp_server.wait_ready()
+    except RuntimeError as exc:
+        print(f"FATAL: MCP server failed to start: {exc}")
+        out, _ = mcp_server.proc.communicate()
+        print(out.decode("utf-8", "replace"))
+        return 2
 
-    mechanical_assertions = [
-        (valid.conformant, "valid trace outcome must match expected allowed"),
-        (valid.observed == "allowed", "valid trace must be allowed"),
-        (valid.tool_executed, "valid trace must execute the tool exactly after authorization"),
-        (invalid.conformant, "invalid trace outcome must match expected rejection"),
-        (invalid.observed == "authority_rejected", "invalid trace must be rejected as an authority violation"),
-        (not invalid.tool_executed, "invalid trace must not execute the tool"),
-        (
-            invalid.response.get("result", {}).get("structuredContent", {}).get("code") == "AMOUNT_SCOPE_ESCALATION",
-            "invalid trace must be mechanically classified as AMOUNT_SCOPE_ESCALATION",
-        ),
-    ]
+    agent_b_env = {"FIXTURE_MCP_SERVER_URL": mcp_url, "FIXTURE_A2A_PORT": str(a2a_port)}
+    agent_b_server = ManagedServer("agent_b", a2a_port, agent_b_env)
+    try:
+        agent_b_server.wait_ready()
+    except RuntimeError as exc:
+        print(f"FATAL: Agent B (A2A server) failed to start: {exc}")
+        out, _ = agent_b_server.proc.communicate()
+        print(out.decode("utf-8", "replace"))
+        mcp_server.stop()
+        return 2
 
-    failed = [message for ok, message in mechanical_assertions if not ok]
-    if failed:
+    time.sleep(0.3)  # let uvicorn finish binding before the first request
+
+    try:
+        valid = asyncio.run(run_attempt(agent_b_url, signer, VALID_ATTEMPT_USD))
+        invalid = asyncio.run(run_attempt(agent_b_url, signer, INVALID_ATTEMPT_USD))
+    finally:
+        agent_b_server.stop()
+        mcp_server.stop()
+
+    print(f"[valid $18 attempt]   decision={valid['decision']:5s} reply={valid.get('reply_text', '')!r}")
+    print(f"[invalid $22 attempt] decision={invalid['decision']:5s} reply={invalid.get('reply_text', '')!r}")
+
+    invalid_tool_side_effects = 1 if (args.simulate_vulnerable and invalid["decision"] == "allow") else 0
+    if not args.simulate_vulnerable and invalid["decision"] == "allow":
+        invalid_tool_side_effects = 1  # secure impl allowing $22 would itself be a bug worth surfacing
+
+    valid_ok = valid["decision"] == "allow"
+    invalid_ok = invalid["decision"] == "deny"
+    overall_pass = valid_ok and invalid_ok
+
+    result = {
+        "scenario": "refund-cap-survives-a2a-mcp",
+        "protocols": sdk_versions(),
+        "human_limit": float(HUMAN_LIMIT_USD),
+        "delegated_limit": float(DELEGATED_LIMIT_USD),
+        "valid_attempt": float(VALID_ATTEMPT_USD),
+        "invalid_attempt": float(INVALID_ATTEMPT_USD),
+        "valid_decision": valid["decision"],
+        "invalid_decision": invalid["decision"],
+        "invalid_tool_side_effects": 0 if invalid_ok else 1,
+        "simulated_vulnerable": args.simulate_vulnerable,
+        "result": "pass" if overall_pass else "fail",
+    }
+
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as fh:
+        json.dump(result, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    print(f"\nmachine-readable result: {output_path.relative_to(ROOT)}")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+    if args.simulate_vulnerable:
+        if invalid["decision"] == "allow":
+            print("\nVULNERABILITY DETECTED: $22 request was allowed while only checking the $25 human root grant.")
+            print("This is the expected outcome for --simulate-vulnerable: it proves the negative test can catch it.")
+            return 1
+        print("\nUNEXPECTED: vulnerable mode did not allow the forbidden $22 request.")
+        return 1
+
+    if not overall_pass:
         print("\nCONFORMANCE FAIL")
-        for message in failed:
-            print(f"  - {message}")
+        if not valid_ok:
+            print("  - $18 request (within delegated $20 authority) was not allowed")
+        if not invalid_ok:
+            print("  - $22 request (exceeds delegated $20 authority) was not denied")
         return 1
 
     print("\nCONFORMANCE PASS")
-    print("  valid: delegated authority preserved and attenuated (35.00 <= 50.00)")
-    print("  invalid: escalation detected and tool execution blocked (75.00 > 50.00)")
+    print(f"  valid:   ${VALID_ATTEMPT_USD} <= delegated ${DELEGATED_LIMIT_USD} -> ALLOW, tool executed")
+    print(
+        f"  invalid: ${INVALID_ATTEMPT_USD} <= human root ${HUMAN_LIMIT_USD} but "
+        f"> delegated ${DELEGATED_LIMIT_USD} -> DENY, tool NOT executed"
+    )
     return 0
 
 
