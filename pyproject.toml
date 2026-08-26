@@ -1,0 +1,6 @@
+[project]
+name = "a2a-mcp-authority-conformance"
+version = "0.1.0"
+description = "Minimal delegated-authority conformance fixture for A2A 1.0 to MCP 2026-07-28 composition"
+requires-python = ">=3.11"
+dependencies = []

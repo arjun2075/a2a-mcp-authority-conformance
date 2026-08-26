@@ -1,0 +1,29 @@
+{
+  "name": "valid_attenuated_refund",
+  "expected": "allowed",
+  "human_grant": {
+    "grant_id": "grant-refund-001",
+    "issuer": "human-approver",
+    "subject": "agent-a",
+    "allow": {
+      "tool": "refund_payment",
+      "arguments": {
+        "order_id": "ORDER-1001",
+        "currency": "USD",
+        "max_amount": "50.00"
+      }
+    },
+    "delegation": {
+      "permitted_agents": ["agent-a", "agent-b"]
+    },
+    "no_privilege_escalation": true
+  },
+  "requested_action": {
+    "tool": "refund_payment",
+    "arguments": {
+      "order_id": "ORDER-1001",
+      "currency": "USD",
+      "amount": "35.00"
+    }
+  }
+}

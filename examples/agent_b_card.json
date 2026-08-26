@@ -1,0 +1,32 @@
+{
+  "name": "Authority Conformance Agent B",
+  "description": "Fixture-only A2A receiver that composes an MCP tool call.",
+  "supportedInterfaces": [
+    {
+      "url": "https://example.invalid/a2a",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extensions": [
+      {
+        "uri": "https://example.org/a2a/extensions/delegated-authority/v1",
+        "description": "Fixture-local delegated-authority metadata contract.",
+        "required": true
+      }
+    ]
+  },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "approved-refund",
+      "name": "Approved Refund",
+      "description": "Executes only refund actions that remain within a signed human grant.",
+      "tags": ["conformance", "authorization", "payments"]
+    }
+  ]
+}
