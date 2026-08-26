@@ -8,7 +8,7 @@ This is **not** a full A2A implementation, full MCP implementation, authorizatio
 
 ## Versions locked for fixture #1
 
-- A2A: latest released `1.0.0` (protocol version header `1.0`)
+- A2A: tested against the A2A v1.x semantics relevant to this fixture; current protocol release at review time: `v1.0.1` (protocol version header `1.0`)
 - MCP: latest revision `2026-07-28`
 
 See `SPEC_NOTES.md` for source links and the exact specification observations used.
