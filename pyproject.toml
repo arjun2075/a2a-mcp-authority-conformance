@@ -2,7 +2,10 @@
 name = "a2a-mcp-authority-conformance"
 version = "0.2.0"
 description = "Conformance fixture: delegated authority attenuation survives Human -> Agent A -> A2A Agent B -> MCP -> Tool"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
+keywords = ["a2a", "mcp", "conformance", "authorization", "delegation"]
 dependencies = [
     "a2a-sdk>=1.1.2,<2",
     "mcp>=2.1.1,<3",

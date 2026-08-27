@@ -122,7 +122,7 @@ The CI job as a whole passes only when the secure implementation passes
 AND the intentionally vulnerable implementation is correctly detected as
 non-conformant. No changes to CI were required.
 
-## Summary of corrections made during this closeout pass
+## Summary of corrections made during this verification pass
 
 - Added one focused regression test for the protobuf `Struct` round-trip
   signature-stability property (`tests/test_authority.py`).

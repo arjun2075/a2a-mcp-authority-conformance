@@ -7,8 +7,9 @@ client against Agent B, which in turn is a real MCP client against the MCP
 server. No handwritten protocol shims: every hop is the official `a2a-sdk`
 or `mcp` SDK talking over a real socket.
 
-Scenario: "Refund Cap Must Survive A2A -> MCP" (see README.md). Not a
-standardization proposal -- see the HO-005 gate note in README.md.
+Scenario: "Refund Cap Must Survive A2A -> MCP" (see README.md). This is a
+conformance fixture, not a standards proposal -- see README.md and
+PRIOR_ART.md for the non-novelty disclaimer and prior-art analysis.
 """
 from __future__ import annotations
 
