@@ -300,3 +300,84 @@ def assert_request_is_within_authority_vulnerable(
         )
     # VULNERABILITY: intermediate delegation (chain.leaf) is never consulted.
     return root_ceiling
+
+
+def assert_request_is_within_authority_truncation_vulnerable(
+    signer: AuthoritySigner,
+    chain: DelegationChain,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    expected_action: str = "refund_order",
+    expected_leaf_delegate: str = "agent-b",
+) -> Decimal:
+    """INTENTIONALLY VULNERABLE variant #2: accepts a valid *prefix* as the requester's authority.
+
+    This models a DIFFERENT bug from
+    `assert_request_is_within_authority_vulnerable`:
+
+      - that one RECEIVES the complete chain and ignores the intermediate
+        hop's attenuation ("saw the $20 grant, didn't apply it");
+      - this one is handed a TRUNCATED chain whose restrictive
+        agent-a -> agent-b hop was omitted, validates the human -> agent-a
+        prefix that *is* present, and never proves the chain terminates at
+        the expected requester ("never saw the $20 grant, didn't notice it was
+        missing").
+
+    The consequence is authority re-expansion: with the $20 hop omitted, the
+    requester's effective ceiling silently reverts to the human root's $25,
+    so a $22 refund is allowed.
+
+    Note `expected_leaf_delegate` is accepted and then deliberately ignored --
+    that unused parameter IS the vulnerability, kept in the signature so this
+    function stays drop-in compatible with the secure checker.
+
+    The ONLY intentional defect is the missing
+    `chain.leaf.grant["delegate"] == expected_leaf_delegate` check. Everything
+    the secure path validates that is meaningful for the *presented* prefix is
+    still enforced here -- signatures, parent binding, issuer/delegate
+    continuity, per-hop attenuation, action/resource scope, and the effective
+    ceiling as min() over the presented links. That matters: it means the
+    demonstration cannot be dismissed as "it only works because signature
+    checking was switched off." The evidence is fully valid; it simply does
+    not authorize the requester.
+
+    Used only by --simulate-vulnerable-truncation and its regression tests.
+    """
+    if not chain.links:
+        raise AuthorityViolation("EMPTY_CHAIN", "delegation chain must contain at least a root grant")
+
+    # Every presented link verifies: signatures, parent binding, attenuation.
+    # The bug is not accepting bad evidence -- it is accepting *incomplete*
+    # evidence as if it authorized the requester.
+    previous = chain.root
+    signer.verify(previous)
+    for link in chain.links[1:]:
+        signer.verify(link)
+        if link.grant.get("parent") != hash_grant(previous.grant):
+            raise AuthorityViolation("PARENT_BINDING_INVALID", "parent hash mismatch")
+        if link.grant.get("issuer") != previous.grant.get("delegate"):
+            raise AuthorityViolation("ISSUER_CHAIN_BROKEN", "issuer/delegate discontinuity")
+        if _decimal(link.grant.get("max_amount_usd"), "max_amount_usd") > _decimal(
+            previous.grant.get("max_amount_usd"), "max_amount_usd"
+        ):
+            raise AuthorityViolation("AMOUNT_NOT_ATTENUATED", "a delegation may only narrow authority")
+        previous = link
+
+    root_grant = chain.root.grant
+    if root_grant.get("action") != expected_action or tool_name != "refund_order":
+        raise AuthorityViolation("TOOL_NOT_AUTHORIZED", f"tool {tool_name!r} is not refund_order")
+
+    if arguments["order_id"] != root_grant.get("resource"):
+        raise AuthorityViolation("RESOURCE_SCOPE_ESCALATION", "order_id outside authorized resource")
+
+    amount = _decimal(arguments["amount_usd"], "amount_usd")
+    ceiling = effective_authority(chain)
+    if amount > ceiling:
+        raise AuthorityViolation(
+            "AMOUNT_SCOPE_ESCALATION",
+            f"requested amount_usd {amount} exceeds presented-chain ceiling {ceiling}",
+        )
+
+    # VULNERABILITY: no `chain.leaf.grant["delegate"] == expected_leaf_delegate`
+    # check. A chain terminating at agent-a is accepted as agent-b's authority.
+    return ceiling

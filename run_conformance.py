@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -27,7 +28,7 @@ ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
-from authority import AuthoritySigner  # noqa: E402
+from authority import AuthoritySigner, DelegationChain  # noqa: E402
 from agent_a import issue_delegation_chain, send_delegated_refund_request  # noqa: E402
 
 DEFAULT_SIGNING_KEY = "fixture-only-secret-not-for-production"
@@ -115,8 +116,13 @@ def sdk_versions() -> dict[str, str]:
     return versions
 
 
-async def run_attempt(agent_b_url: str, signer, requested_amount_usd: str) -> dict:
+async def run_attempt(agent_b_url: str, signer, requested_amount_usd: str, truncate_chain: bool = False) -> dict:
     chain = issue_delegation_chain(signer, ORDER_ID, HUMAN_LIMIT_USD, DELEGATED_LIMIT_USD)
+    if truncate_chain:
+        # Present ONLY the human -> agent-a root grant. The restrictive
+        # agent-a -> agent-b ($20) hop is omitted from the evidence, so the
+        # presented chain terminates at agent-a while the requester is agent-b.
+        chain = DelegationChain(links=(chain.root,))
     result = await send_delegated_refund_request(agent_b_url, chain, ORDER_ID, requested_amount_usd)
     decision = "deny" if result.get("reply_text", "").upper().startswith("DENY") else "allow"
     if result.get("state") == 4:  # TASK_STATE_FAILED
@@ -131,8 +137,21 @@ def main() -> int:
         action="store_true",
         help="Run the MCP server in intentionally vulnerable mode (checks only the human root grant).",
     )
+    parser.add_argument(
+        "--simulate-vulnerable-truncation",
+        action="store_true",
+        help="Run the MCP server in the chain-truncation vulnerable mode (accepts a valid "
+        "upstream prefix as the requester's authority, without proving the chain reaches them).",
+    )
     parser.add_argument("--output", default=str(ROOT / "traces" / "result.json"))
     args = parser.parse_args()
+
+    if args.simulate_vulnerable and args.simulate_vulnerable_truncation:
+        parser.error(
+            "--simulate-vulnerable and --simulate-vulnerable-truncation are mutually exclusive: "
+            "they model two different bugs (ignoring a received attenuation vs. accepting a "
+            "truncated chain), and running both at once would make the reported result ambiguous."
+        )
 
     signing_key = os.environ.get("FIXTURE_SIGNING_KEY", DEFAULT_SIGNING_KEY)
     signer = AuthoritySigner(signing_key.encode("utf-8"))
@@ -145,6 +164,8 @@ def main() -> int:
     mcp_env = {"FIXTURE_SIGNING_KEY": signing_key, "FIXTURE_MCP_PORT": str(mcp_port)}
     if args.simulate_vulnerable:
         mcp_env["FIXTURE_SIMULATE_VULNERABLE"] = "1"
+    if args.simulate_vulnerable_truncation:
+        mcp_env["FIXTURE_SIMULATE_VULNERABLE_TRUNCATION"] = "1"
 
     mcp_server = ManagedServer("mcp_server", mcp_port, mcp_env)
     try:
@@ -171,20 +192,52 @@ def main() -> int:
     try:
         valid = asyncio.run(run_attempt(agent_b_url, signer, VALID_ATTEMPT_USD))
         invalid = asyncio.run(run_attempt(agent_b_url, signer, INVALID_ATTEMPT_USD))
+        # Chain-truncation cases: same requester (agent-b), evidence missing
+        # the restrictive agent-a -> agent-b hop. Both must be denied on
+        # chain/requester binding, independently of the amount.
+        truncated_invalid = asyncio.run(
+            run_attempt(agent_b_url, signer, INVALID_ATTEMPT_USD, truncate_chain=True)
+        )
+        truncated_valid_amount = asyncio.run(
+            run_attempt(agent_b_url, signer, VALID_ATTEMPT_USD, truncate_chain=True)
+        )
     finally:
         agent_b_server.stop()
         mcp_server.stop()
 
-    print(f"[valid $18 attempt]   decision={valid['decision']:5s} reply={valid.get('reply_text', '')!r}")
-    print(f"[invalid $22 attempt] decision={invalid['decision']:5s} reply={invalid.get('reply_text', '')!r}")
+    print(f"[valid $18 attempt]             decision={valid['decision']:5s} reply={valid.get('reply_text', '')!r}")
+    print(f"[invalid $22 attempt]           decision={invalid['decision']:5s} reply={invalid.get('reply_text', '')!r}")
+    print(
+        f"[truncated-chain $22 attempt]   decision={truncated_invalid['decision']:5s} "
+        f"reply={truncated_invalid.get('reply_text', '')!r}"
+    )
+    print(
+        f"[truncated-chain $18 control]   decision={truncated_valid_amount['decision']:5s} "
+        f"reply={truncated_valid_amount.get('reply_text', '')!r}"
+    )
 
     invalid_tool_side_effects = 1 if (args.simulate_vulnerable and invalid["decision"] == "allow") else 0
     if not args.simulate_vulnerable and invalid["decision"] == "allow":
         invalid_tool_side_effects = 1  # secure impl allowing $22 would itself be a bug worth surfacing
 
+    def _reason(attempt: dict) -> str | None:
+        """Extract the fixture's deny code from the tool-error reply, e.g. '(LEAF_DELEGATE_MISMATCH)'."""
+        match = re.search(r"\(([A-Z_]+)\)\s*$", attempt.get("reply_text", "").strip())
+        return match.group(1) if match else None
+
     valid_ok = valid["decision"] == "allow"
     invalid_ok = invalid["decision"] == "deny"
-    overall_pass = valid_ok and invalid_ok
+    truncated_invalid_reason = _reason(truncated_invalid)
+    truncated_valid_reason = _reason(truncated_valid_amount)
+    # Both truncated cases must be denied, and specifically on chain/requester
+    # binding -- not on the amount. That is what makes this a distinct property.
+    truncated_ok = (
+        truncated_invalid["decision"] == "deny"
+        and truncated_valid_amount["decision"] == "deny"
+        and truncated_invalid_reason == "LEAF_DELEGATE_MISMATCH"
+        and truncated_valid_reason == "LEAF_DELEGATE_MISMATCH"
+    )
+    overall_pass = valid_ok and invalid_ok and truncated_ok
 
     result = {
         "scenario": "refund-cap-survives-a2a-mcp",
@@ -196,7 +249,24 @@ def main() -> int:
         "valid_decision": valid["decision"],
         "invalid_decision": invalid["decision"],
         "invalid_tool_side_effects": 0 if invalid_ok else 1,
+        "invalid_reason": _reason(invalid),
+        "truncated_chain": {
+            "requester": "agent-b",
+            "presented_chain_leaf_delegate": "agent-a",
+            "presented_chain_links": 1,
+            "omitted_hop": "agent-a -> agent-b",
+            "omitted_hop_limit": float(DELEGATED_LIMIT_USD),
+            "invalid_attempt": float(INVALID_ATTEMPT_USD),
+            "invalid_decision": truncated_invalid["decision"],
+            "invalid_reason": truncated_invalid_reason,
+            "invalid_tool_executed": truncated_invalid["decision"] == "allow",
+            "control_attempt": float(VALID_ATTEMPT_USD),
+            "control_decision": truncated_valid_amount["decision"],
+            "control_reason": truncated_valid_reason,
+            "control_tool_executed": truncated_valid_amount["decision"] == "allow",
+        },
         "simulated_vulnerable": args.simulate_vulnerable,
+        "simulated_vulnerable_truncation": args.simulate_vulnerable_truncation,
         "result": "pass" if overall_pass else "fail",
     }
 
@@ -207,6 +277,21 @@ def main() -> int:
         fh.write("\n")
     print(f"\nmachine-readable result: {output_path.relative_to(ROOT)}")
     print(json.dumps(result, indent=2, sort_keys=True))
+
+    if args.simulate_vulnerable_truncation:
+        if truncated_invalid["decision"] == "allow":
+            print(
+                f"\nVULNERABILITY DETECTED (chain truncation): ${INVALID_ATTEMPT_USD} was allowed for "
+                f"agent-b on a chain that terminates at agent-a."
+            )
+            print(
+                f"  The omitted agent-a -> agent-b hop capped agent-b at ${DELEGATED_LIMIT_USD}; "
+                f"dropping it re-expanded authority to the human root ${HUMAN_LIMIT_USD}."
+            )
+            print("  All presented evidence was individually valid -- it simply did not authorize the requester.")
+            return 1
+        print("\nUNEXPECTED: vulnerable-truncation mode did not allow the forbidden $22 request.")
+        return 1
 
     if args.simulate_vulnerable:
         if invalid["decision"] == "allow":
@@ -222,13 +307,23 @@ def main() -> int:
             print("  - $18 request (within delegated $20 authority) was not allowed")
         if not invalid_ok:
             print("  - $22 request (exceeds delegated $20 authority) was not denied")
+        if not truncated_ok:
+            print(
+                "  - truncated-chain requests were not denied with LEAF_DELEGATE_MISMATCH "
+                f"($22 -> {truncated_invalid['decision']}/{truncated_invalid_reason}, "
+                f"$18 -> {truncated_valid_amount['decision']}/{truncated_valid_reason})"
+            )
         return 1
 
     print("\nCONFORMANCE PASS")
     print(f"  valid:   ${VALID_ATTEMPT_USD} <= delegated ${DELEGATED_LIMIT_USD} -> ALLOW, tool executed")
     print(
         f"  invalid: ${INVALID_ATTEMPT_USD} <= human root ${HUMAN_LIMIT_USD} but "
-        f"> delegated ${DELEGATED_LIMIT_USD} -> DENY, tool NOT executed"
+        f"> delegated ${DELEGATED_LIMIT_USD} -> DENY (AMOUNT_SCOPE_ESCALATION), tool NOT executed"
+    )
+    print(
+        f"  truncated: chain terminating at agent-a is not agent-b's authority -> DENY "
+        f"(LEAF_DELEGATE_MISMATCH) at both ${INVALID_ATTEMPT_USD} and ${VALID_ATTEMPT_USD}, tool NOT executed"
     )
     return 0
 

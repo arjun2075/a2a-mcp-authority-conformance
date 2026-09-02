@@ -303,6 +303,74 @@ all, so a widened downstream request that still fits under the root limit
 is (incorrectly) allowed. It exists solely to demonstrate that the negative
 test in `run_conformance.py` can actually detect this class of bug.
 
+`assert_request_is_within_authority_truncation_vulnerable` is a **second**,
+distinct broken counterpart used only by `--simulate-vulnerable-truncation`.
+The two vulnerable modes model different bugs and must not be conflated:
+
+| Vulnerable mode | Evidence received | Bug |
+| --- | --- | --- |
+| `--simulate-vulnerable` | complete chain (`$25` → `$20`) | saw the `$20` hop, ignored its attenuation |
+| `--simulate-vulnerable-truncation` | truncated chain (`$25` only) | never saw the `$20` hop, failed to notice the chain does not reach the requester |
+
+## Security properties covered
+
+| # | Property | Presented chain | Requester | Amount | Expected |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Normal success | `$25` → `$20` (complete) | agent-b | `$18` | **ALLOW**, tool executes |
+| 2 | Attenuation enforcement | `$25` → `$20` (complete) | agent-b | `$22` | **DENY** `AMOUNT_SCOPE_ESCALATION` |
+| 3 | Chain-truncation resistance | `$25` only (`agent-a → agent-b` omitted) | agent-b | `$22` | **DENY** `LEAF_DELEGATE_MISMATCH` |
+| 4 | Truncation control | `$25` only (`agent-a → agent-b` omitted) | agent-b | `$18` | **DENY** `LEAF_DELEGATE_MISMATCH` |
+
+Properties 2 and 3 are deliberately **different failure modes and different
+error codes**, and the fixture asserts they stay distinguishable:
+
+- In (2) the chain is *complete*. Every hop is present; the request simply
+  asks for more than the narrowest hop granted. The failure is attenuation.
+- In (3) the chain is *incomplete*. Every credential presented is
+  individually valid and correctly signed — but the chain terminates at
+  `agent-a`, and the expected requester is `agent-b`. The failure is that the
+  presented evidence never delegated anything to the requester.
+
+A verifier must not treat "all presented credentials are valid" as
+equivalent to "the requester holds a complete valid delegation path."
+Truncating a restrictive downstream hop must not restore the authority
+available to an upstream principal.
+
+Property (4) is the control that makes (3) meaningful. `$18` is within
+*both* the human `$25` and the delegated `$20`, so no amount check could
+reject it — yet it is still denied, because the presented chain does not
+reach `agent-b`. This proves requester/chain binding is enforced
+**independently of** amount attenuation, rather than being an accidental
+side effect of the ceiling comparison.
+
+### Limitation: how the requester identity is established
+
+The truncation defense depends on a trustworthy binding between the actual
+caller and the `expected_leaf_delegate` value supplied to the terminal
+authorization check. **In this fixture that binding is fixture-local and
+configured** — `expected_leaf_delegate` defaults to `"agent-b"` in
+`assert_request_is_within_authority`; it is *not* derived from an
+authenticated MCP transport or session identity, and this fixture does not
+authenticate the caller at all.
+
+A production deployment must derive that value from the authenticated
+session/principal rather than from caller-controlled evidence. If the
+requester identity were itself attacker-supplied, this check would provide
+no protection: an attacker who can claim to be `agent-a` can present a chain
+terminating at `agent-a`. The property demonstrated here is *"a chain that
+does not reach the expected requester is refused"*, not *"the requester is
+who they say they are."*
+
+### The re-expansion this prevents
+
+If a terminal verifier accepts the valid `human-approval → agent-a` prefix
+as sufficient authority for `agent-b`, then `$22` becomes allowed even
+though `agent-b`'s real delegated ceiling was `$20`. Omitting the
+restrictive hop silently re-expands effective authority from `$20` back to
+the human root's `$25`. `--simulate-vulnerable-truncation` executes exactly
+that path and the tool really does run, which is what makes the secure
+mode's `LEAF_DELEGATE_MISMATCH` denial load-bearing rather than incidental.
+
 Signing is a deterministic HMAC-SHA256 over canonical JSON. **This is a test
 integrity primitive, not a production trust model.** A production system
 would need real asymmetric signatures, key management, revocation, and
@@ -351,6 +419,10 @@ programmatically in `tests/test_conformance.py` and re-verified in
 2. `python run_conformance.py` exits `0` with `CONFORMANCE PASS`.
 3. `python run_conformance.py --simulate-vulnerable` exits non-zero — CI
    fails if the vulnerable variant is incorrectly accepted as passing.
+4. `python run_conformance.py --simulate-vulnerable-truncation` exits
+   non-zero — CI fails if the chain-truncation variant (which accepts a
+   valid upstream prefix as the requester's authority) is incorrectly
+   accepted as passing.
 
 The CI job as a whole passes only when the secure implementation passes
 **and** the intentionally vulnerable implementation is correctly detected

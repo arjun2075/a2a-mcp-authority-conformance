@@ -37,11 +37,53 @@ jobs:
       - name: Run secure conformance scenario (expect exit 0, CONFORMANCE PASS)
         run: python run_conformance.py
 
-      - name: Run vulnerability detector (expect nonzero exit)
+      - name: Run vulnerability detector (expect exit 1 + detection marker)
         run: |
-          if python run_conformance.py --simulate-vulnerable; then
-            echo "ERROR: vulnerable implementation incorrectly passed"
+          set +e
+          output="$(python run_conformance.py --simulate-vulnerable 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          # Exit status alone is not sufficient: an import error, syntax error,
+          # or any unrelated crash also exits nonzero and would otherwise
+          # masquerade as a successful detection. Require the exact
+          # vulnerability-detected status AND the marker the runner prints.
+          if [ "$status" -ne 1 ]; then
+            echo "ERROR: expected exit 1 (vulnerability detected), got $status"
             exit 1
-          else
-            echo "OK: vulnerable implementation was correctly detected as non-conformant"
           fi
+          if ! printf '%s' "$output" | grep -qF "VULNERABILITY DETECTED:"; then
+            echo "ERROR: exit 1 but the expected detection marker was absent (likely a crash, not a detection)"
+            exit 1
+          fi
+          echo "OK: vulnerable implementation was correctly detected as non-conformant"
+
+      - name: Run chain-truncation vulnerability detector (expect exit 1 + detection marker)
+        run: |
+          set +e
+          output="$(python run_conformance.py --simulate-vulnerable-truncation 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 1 ]; then
+            echo "ERROR: expected exit 1 (vulnerability detected), got $status"
+            exit 1
+          fi
+          if ! printf '%s' "$output" | grep -qF "VULNERABILITY DETECTED (chain truncation)"; then
+            echo "ERROR: exit 1 but the expected truncation marker was absent (likely a crash, not a detection)"
+            exit 1
+          fi
+          echo "OK: chain-truncation vulnerability was correctly detected as non-conformant"
+
+      - name: Reject ambiguous dual vulnerable configuration (expect exit 2)
+        run: |
+          set +e
+          output="$(python run_conformance.py --simulate-vulnerable --simulate-vulnerable-truncation 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 2 ]; then
+            echo "ERROR: expected exit 2 (configuration error), got $status"
+            exit 1
+          fi
+          echo "OK: both vulnerable modes at once is rejected as a configuration error"
