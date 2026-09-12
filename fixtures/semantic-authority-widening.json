@@ -1,0 +1,80 @@
+{
+  "$schema": "./semantic-authority-widening.schema.json",
+  "fixture": "lossy-a2a-to-mcp-semantic-authority",
+  "upstream_authority": {
+    "action": "refund_order",
+    "constraints": [
+      {"id": "C1", "attribute": "resource", "operator": "equals", "value": "O-1001"},
+      {"id": "C2", "attribute": "operation_class", "operator": "equals", "value": "original_payment_method"}
+    ]
+  },
+  "operation_universe": [
+    {"action": "refund_order", "resource": "O-1001", "operation_class": "original_payment_method", "amount_usd": "10.00"},
+    {"action": "refund_order", "resource": "O-1001", "operation_class": "original_payment_method", "amount_usd": "20.00"},
+    {"action": "refund_order", "resource": "O-1001", "operation_class": "store_credit", "amount_usd": "10.00"},
+    {"action": "refund_order", "resource": "O-2002", "operation_class": "original_payment_method", "amount_usd": "10.00"},
+    {"action": "cancel_order", "resource": "O-1001", "operation_class": "standard", "amount_usd": "0.00"}
+  ],
+  "cases": [
+    {
+      "name": "c1-and-c2-preserved-directly",
+      "authenticated_leaf_bound": true,
+      "mcp_action": "refund_order",
+      "mcp_supported_constraint_attributes": ["resource", "operation_class"],
+      "downstream_enforcement": [],
+      "expected": "PASS"
+    },
+    {
+      "name": "c2-representation-lost-but-equivalently-enforced",
+      "authenticated_leaf_bound": true,
+      "mcp_action": "refund_order",
+      "mcp_supported_constraint_attributes": ["resource"],
+      "downstream_enforcement": [
+        {
+          "mechanism": "trusted-refund-policy",
+          "trusted": true,
+          "constraint": {"id": "POLICY-C2", "attribute": "operation_class", "operator": "equals", "value": "original_payment_method"}
+        }
+      ],
+      "expected": "PASS"
+    },
+    {
+      "name": "c2-lost-without-equivalent-enforcement",
+      "authenticated_leaf_bound": true,
+      "mcp_action": "refund_order",
+      "mcp_supported_constraint_attributes": ["resource"],
+      "downstream_enforcement": [],
+      "expected": "FAIL",
+      "expected_classification": "SEMANTIC_AUTHORITY_WIDENING",
+      "expected_witness_operation": {"action": "refund_order", "resource": "O-1001", "operation_class": "store_credit", "amount_usd": "10.00"}
+    },
+    {
+      "name": "invalid-authenticated-leaf-binding",
+      "authenticated_leaf_bound": false,
+      "mcp_action": "refund_order",
+      "mcp_supported_constraint_attributes": ["resource", "operation_class"],
+      "downstream_enforcement": [],
+      "expected": "FAIL",
+      "expected_classification": "LEAF_DELEGATE_MISMATCH"
+    },
+    {
+      "name": "stricter-trusted-downstream-restriction",
+      "authenticated_leaf_bound": true,
+      "mcp_action": "refund_order",
+      "mcp_supported_constraint_attributes": ["resource"],
+      "downstream_enforcement": [
+        {
+          "mechanism": "trusted-refund-policy",
+          "trusted": true,
+          "constraint": {"id": "POLICY-C2", "attribute": "operation_class", "operator": "equals", "value": "original_payment_method"}
+        },
+        {
+          "mechanism": "trusted-refund-policy",
+          "trusted": true,
+          "constraint": {"id": "POLICY-MAX-15", "attribute": "amount_usd", "operator": "max", "value": "15.00"}
+        }
+      ],
+      "expected": "PASS"
+    }
+  ]
+}

@@ -37,6 +37,9 @@ jobs:
       - name: Run secure conformance scenario (expect exit 0, CONFORMANCE PASS)
         run: python run_conformance.py
 
+      - name: Run semantic translation vectors (expected negative is rejected)
+        run: python run_semantic_translation.py
+
       - name: Run vulnerability detector (expect exit 1 + detection marker)
         run: |
           set +e

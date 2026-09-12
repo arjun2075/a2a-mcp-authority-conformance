@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/a2a-mcp-conformance/semantic-authority-widening.schema.json",
+  "title": "Fixture-local semantic authority translation vectors",
+  "type": "object",
+  "required": ["fixture", "upstream_authority", "operation_universe", "cases"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "fixture": {"type": "string", "minLength": 1},
+    "upstream_authority": {
+      "type": "object",
+      "required": ["action", "constraints"],
+      "properties": {
+        "action": {"type": "string", "minLength": 1},
+        "constraints": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/constraint"}}
+      },
+      "additionalProperties": false
+    },
+    "operation_universe": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "object", "required": ["action"], "additionalProperties": true}
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "authenticated_leaf_bound", "mcp_action", "mcp_supported_constraint_attributes", "downstream_enforcement", "expected"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "authenticated_leaf_bound": {"type": "boolean"},
+          "mcp_action": {"type": "string", "minLength": 1},
+          "mcp_supported_constraint_attributes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "downstream_enforcement": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["mechanism", "trusted", "constraint"],
+              "properties": {
+                "mechanism": {"type": "string", "minLength": 1},
+                "trusted": {"type": "boolean"},
+                "constraint": {"$ref": "#/$defs/constraint"}
+              },
+              "additionalProperties": false
+            }
+          },
+          "expected": {"enum": ["PASS", "FAIL"]},
+          "expected_classification": {"type": ["string", "null"]},
+          "expected_witness_operation": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "constraint": {
+      "type": "object",
+      "required": ["id", "attribute", "operator", "value"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "attribute": {"type": "string", "minLength": 1},
+        "operator": {"enum": ["equals", "max"]},
+        "value": {}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
