@@ -21,6 +21,7 @@ handwritten HTTP/JSON-RPC shims.
 ## Table of contents
 
 - [The scenario](#the-scenario-refund-cap-must-survive-a2a--mcp)
+- [Lossy translation semantic fixture](#lossy-translation-semantic-fixture)
 - [Threat model](#threat-model)
 - [Protocol-defined vs. fixture-local behavior](#protocol-defined-behavior-vs-fixture-local-behavior)
 - [SDKs used](#sdks-used-exact-versions)
@@ -50,6 +51,26 @@ The invalid case is deliberately designed so that `$22 <= $25` is true. A
 broken implementation that checks only the human root grant would
 incorrectly allow it. The correct effective authority is the **intersection
 across the whole delegation chain**, not just its root or just its leaf.
+
+## Lossy translation semantic fixture
+
+The repository also includes an executable negative/control vector set for a
+different failure class: semantic authority widening caused by lossy A2A→MCP
+translation. It implements the fixture-scoped invariant:
+
+```text
+effective_authority(downstream) ⊆ delegated_authority(upstream)
+```
+
+The negative vector carries `C1 + C2` upstream, directly represents only
+`C1` downstream, and demonstrates a concrete `store_credit` refund operation
+that becomes newly permitted when `C2` has no equivalent enforcement. It
+fails as `SEMANTIC_AUTHORITY_WIDENING` even though authentication and leaf
+binding are valid. The control loses the same wire representation but passes
+because a trusted downstream policy enforces equivalent `C2` semantics.
+
+See [docs/SEMANTIC_AUTHORITY_TRANSLATION.md](docs/SEMANTIC_AUTHORITY_TRANSLATION.md)
+for the model, scope limits, HandoffProbe boundary, and executable examples.
 
 ## Threat model
 
@@ -217,17 +238,25 @@ a2a-mcp-authority-conformance/
 ├── PRIOR_ART.md
 ├── VERIFICATION_RESULTS.md
 ├── pyproject.toml
+├── docs/
+│   └── SEMANTIC_AUTHORITY_TRANSLATION.md
+├── fixtures/
+│   ├── semantic-authority-widening.json
+│   └── semantic-authority-widening.schema.json
 ├── src/
 │   ├── authority.py      # fixture-local delegation-chain model + PEP (protocol-agnostic)
 │   ├── constants.py       # namespaced metadata keys (fixture-local)
 │   ├── agent_a.py         # real A2A client: issues chain, sends A2A message
 │   ├── agent_b.py         # real A2A server + real MCP client
 │   ├── mcp_server.py       # real MCP server exposing refund_order
+│   ├── semantic_authority.py # fixture-scoped translation/subset evaluator
 │   └── refund_tool.py      # the tool-side side-effect ledger
 ├── tests/
 │   ├── test_authority.py    # unit tests for the policy-enforcement logic
-│   └── test_conformance.py  # end-to-end test driving the real server processes
+│   ├── test_conformance.py  # end-to-end test driving the real server processes
+│   └── test_semantic_authority.py # lossy translation vectors
 ├── run_conformance.py       # orchestrates the full scenario, emits JSON result
+├── run_semantic_translation.py # executes semantic translation vectors
 └── .github/workflows/conformance.yml
 ```
 
@@ -246,6 +275,10 @@ python -m pytest tests/ -v
 # secure implementation
 python run_conformance.py
 # -> exit 0, prints "CONFORMANCE PASS"
+
+# lossy translation negative + controls
+python run_semantic_translation.py
+# -> exit 0 when all expected PASS/FAIL vector outcomes match
 
 # vulnerability detector: intentionally-broken variant that checks
 # only the human root grant and ignores the agent-a -> agent-b attenuation
