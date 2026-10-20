@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/a2a-mcp-authority/external-report-v0.1.schema.json",
+  "title": "External validation evidence report v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_id",
+    "manifest",
+    "target",
+    "created_at",
+    "results",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/target"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/result"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation",
+        "version",
+        "operator_authorized",
+        "authorization_scope",
+        "environment",
+        "adapter_version"
+      ],
+      "properties": {
+        "implementation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository_or_provenance": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_authorized": {
+          "type": "boolean"
+        },
+        "authorization_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "enum": [
+            "sandbox",
+            "dry_run",
+            "authorized_test_resource"
+          ]
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "a2a_sdk_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mcp_sdk_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wire_protocol_versions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "configuration_hash": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vector_id",
+        "status",
+        "reason",
+        "attempts",
+        "evidence"
+      ],
+      "properties": {
+        "vector_id": {
+          "type": "string",
+          "pattern": "^V[1-7]$"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "NOT_EVALUATED",
+            "INCONCLUSIVE",
+            "ERROR"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observed_attempt"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "failure_class": {
+          "enum": [
+            "AMOUNT_SCOPE_ESCALATION",
+            "LEAF_DELEGATE_MISMATCH",
+            "AUTHENTICATED_CALLER_MISMATCH",
+            "SEMANTIC_AUTHORITY_WIDENING",
+            "UNEXPECTED_AUTHORIZATION_DENIAL",
+            "OTHER_VERIFIED_FAILURE"
+          ]
+        }
+      }
+    },
+    "observed_attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "observed_decision",
+        "observed_effect_count",
+        "correlation_id"
+      ],
+      "properties": {
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_decision": {
+          "enum": [
+            "allow",
+            "deny",
+            "unknown"
+          ]
+        },
+        "observed_effect_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "kind",
+        "basis",
+        "observer",
+        "method",
+        "evidence_ref",
+        "limitations",
+        "complete_effect_coverage"
+      ],
+      "properties": {
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "terminal_decision",
+            "tool_invocation",
+            "tool_effect",
+            "tool_response",
+            "translation",
+            "effective_policy",
+            "identity_binding"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "direct_observation",
+            "tester_interpretation",
+            "implementation_self_report"
+          ]
+        },
+        "observer": {
+          "enum": [
+            "independent_tester",
+            "target_operator",
+            "implementation"
+          ]
+        },
+        "method": {
+          "enum": [
+            "sandbox_state_diff",
+            "instrumented_trace",
+            "operator_log",
+            "tool_response",
+            "authenticated_session",
+            "policy_snapshot",
+            "other"
+          ]
+        },
+        "evidence_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limitations": {
+          "type": "string"
+        },
+        "complete_effect_coverage": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

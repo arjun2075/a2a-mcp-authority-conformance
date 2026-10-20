@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1.0",
+  "report_id": "example-unrun-pilot",
+  "manifest": {
+    "id": "a2a-mcp-external-pilot-v0.1",
+    "version": "0.1.0"
+  },
+  "target": null,
+  "created_at": "2026-10-20T00:00:00Z",
+  "results": [
+    {
+      "vector_id": "V1",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V2",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V3",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V4",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V5",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V6",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    },
+    {
+      "vector_id": "V7",
+      "status": "NOT_EVALUATED",
+      "reason": "No opted-in external implementation, adapter, or independently verified execution has been selected.",
+      "attempts": [],
+      "evidence": []
+    }
+  ],
+  "limitations": [
+    "Illustrative schema-valid unrun report only; no external testing, authorization, or test outcomes are claimed."
+  ]
+}
