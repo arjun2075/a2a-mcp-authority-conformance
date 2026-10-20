@@ -1,0 +1,149 @@
+{
+  "schema_version": "0.1.0",
+  "manifest_id": "a2a-mcp-external-pilot-v0.1",
+  "reference_issue": "https://github.com/arjun2075/a2a-mcp-authority-conformance/issues/2",
+  "testing_scope": "Exactly one opted-in, instrumented A2A-to-MCP test implementation; sandbox or dry-run only. No live financial activity.",
+  "semantics_note": "Expected behavior is a proposed pilot criterion, not a normative requirement of A2A or MCP. Errors and delegation representations are fixture-local.",
+  "vectors": [
+    {
+      "id": "V1",
+      "property": "authorized_baseline",
+      "description": "$18 refund within both root ($25) and intermediate ($20) ceilings",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "authenticated_delegate",
+        "sandbox_effect_observation"
+      ],
+      "attempts": [
+        {
+          "id": "allowed-18",
+          "description": "Agent B requests $18 on O-1001 with valid chain ending at B",
+          "expected_decision": "allow",
+          "expected_effect_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V2",
+      "property": "intermediate_attenuation",
+      "description": "$22 is within root $25 but above intermediate $20; fail closed",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "intermediate_delegation_enforcement",
+        "sandbox_effect_observation"
+      ],
+      "attempts": [
+        {
+          "id": "deny-22",
+          "description": "Agent B requests $22 with valid $25 -> $20 chain",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    },
+    {
+      "id": "V3",
+      "property": "chain_truncation",
+      "description": "Authenticated B presents root-to-A chain ending at A",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "independent_authenticated_caller",
+        "chain_leaf_verification"
+      ],
+      "attempts": [
+        {
+          "id": "truncated-18",
+          "description": "B attempts $18 with only human-to-A grant",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    },
+    {
+      "id": "V4",
+      "property": "authenticated_caller_mismatch",
+      "description": "Authenticated C presents chain terminating in B",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "independent_authenticated_caller",
+        "chain_leaf_verification"
+      ],
+      "attempts": [
+        {
+          "id": "mismatched-18",
+          "description": "C requests $18 with otherwise valid chain terminating at B",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    },
+    {
+      "id": "V5",
+      "property": "semantic_authority_widening",
+      "description": "C1 resource retained, C2 operation_class dropped without equivalent policy",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "observable_translation",
+        "observable_effective_policy",
+        "sandbox_effect_observation"
+      ],
+      "attempts": [
+        {
+          "id": "store-credit-deny",
+          "description": "$10 store_credit on O-1001 prohibited by upstream C2",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    },
+    {
+      "id": "V6",
+      "property": "semantic_equivalent_enforcement",
+      "description": "C2 absent on wire but independently established downstream policy preserves it",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "observable_translation",
+        "observable_effective_policy",
+        "sandbox_effect_observation"
+      ],
+      "attempts": [
+        {
+          "id": "original-method-allow",
+          "description": "$10 original_payment_method refund on O-1001",
+          "expected_decision": "allow",
+          "expected_effect_count": 1
+        },
+        {
+          "id": "store-credit-deny",
+          "description": "$10 store_credit on O-1001 prohibited by trusted C2-equivalent policy",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    },
+    {
+      "id": "V7",
+      "property": "conservative_narrowing",
+      "description": "Downstream policy is stricter (e.g. max $15) than upstream; narrowing is allowed",
+      "prerequisites": [
+        "operator_authorized_test_target",
+        "observable_effective_policy",
+        "sandbox_effect_observation"
+      ],
+      "attempts": [
+        {
+          "id": "under-15-allow",
+          "description": "$10 original_payment_method refund on O-1001",
+          "expected_decision": "allow",
+          "expected_effect_count": 1
+        },
+        {
+          "id": "over-15-deny",
+          "description": "$20 original_payment_method refund on O-1001 under downstream $15 cap",
+          "expected_decision": "deny",
+          "expected_effect_count": 0
+        }
+      ]
+    }
+  ]
+}

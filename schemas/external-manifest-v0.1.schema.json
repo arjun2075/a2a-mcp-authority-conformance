@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/a2a-mcp-authority/external-manifest-v0.1.schema.json",
+  "title": "External validation pilot manifest v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "reference_issue",
+    "testing_scope",
+    "semantics_note",
+    "vectors"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "manifest_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reference_issue": {
+      "type": "string",
+      "format": "uri"
+    },
+    "testing_scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantics_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vectors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/vector"
+      }
+    }
+  },
+  "$defs": {
+    "vector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "property",
+        "description",
+        "prerequisites",
+        "attempts"
+      ],
+      "properties": {
+        "id": {
+          "pattern": "^V[1-7]$",
+          "type": "string"
+        },
+        "property": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prerequisites": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/attempt"
+          }
+        }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "expected_decision",
+        "expected_effect_count"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]+$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "expected_effect_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
